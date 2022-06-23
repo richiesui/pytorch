@@ -1188,23 +1188,26 @@ class TestExperimentalUtils(TestCase):
             MockKinetoEvent("cudaLaunchKernel", 400, 100, 1, DeviceType.CPU),
             MockKinetoEvent("cudaLaunchKernel", 500, 100, 2, DeviceType.CPU),
             MockKinetoEvent("cudaLaunchKernel", 600, 100, 3, DeviceType.CPU),
+            MockKinetoEvent("cudaLaunchKernel", 1500, 100, 4, DeviceType.CPU),
             MockKinetoEvent("GPU", 700, 100, 1, DeviceType.CUDA),
             MockKinetoEvent("GPU", 800, 100, 2, DeviceType.CUDA),
-            MockKinetoEvent("GPU", 900, 100, 3, DeviceType.CUDA)
+            MockKinetoEvent("GPU", 900, 100, 3, DeviceType.CUDA),
+            MockKinetoEvent("GPU", 1700, 100, 4, DeviceType.CUDA)
         ]
 
         cpu_events = [
             MockProfilerEvent("CPU", 1, 0, 100000),
-            MockProfilerEvent("CPU", 2, 100001, 100000),
-            MockProfilerEvent("CPU", 3, 200001, 100000),
-            MockProfilerEvent("CPU", 4, 300001, 100000),
-            MockProfilerEvent("CPU", 5, 400001, 100000),
-            MockProfilerEvent("CPU", 6, 500001, 100000),
-            MockProfilerEvent("CPU", 7, 600001, 100000),
-            MockProfilerEvent("CPU", 8, 700001, 100000),
-            MockProfilerEvent("CPU", 9, 800001, 100000),
-            MockProfilerEvent("CPU", 10, 900001, 100000),
-            MockProfilerEvent("CPU", 11, 1000001, 100000),
+            MockProfilerEvent("CPU", 2, 100000, 100000),
+            MockProfilerEvent("CPU", 3, 200000, 100000),
+            MockProfilerEvent("CPU", 4, 300000, 100000),
+            MockProfilerEvent("CPU", 5, 400000, 100000),
+            MockProfilerEvent("CPU", 6, 500000, 100000),
+            MockProfilerEvent("CPU", 7, 600000, 100000),
+            MockProfilerEvent("CPU", 8, 700000, 100000),
+            MockProfilerEvent("CPU", 9, 800000, 100000),
+            MockProfilerEvent("CPU", 10, 900000, 100000),
+            MockProfilerEvent("CPU", 11, 1100000, 100000),
+            MockProfilerEvent("CPU", 12, 1200000, 500000),
         ]
 
         profiler = unittest.mock.Mock()
@@ -1254,6 +1257,8 @@ class TestExperimentalUtils(TestCase):
 2 [GPU]
 1 [GPU]
 0 [GPU]
+1 [cudaLaunchKernel]
+0 [GPU]
 """)
         self.assertExpectedInline(
             format_queue_depth([
@@ -1271,6 +1276,7 @@ class TestExperimentalUtils(TestCase):
 1 [CPU]
 0 [CPU]
 0 [CPU]
+0 [CPU]
 """)
 
     def test_utils_compute_queue_depth_when_no_cuda_events(self):
@@ -1281,6 +1287,54 @@ class TestExperimentalUtils(TestCase):
                 x = x @ x
         basic_evaluation = _utils.BasicEvaluation(prof.profiler)
         self.assertFalse(basic_evaluation.compute_queue_depth())
+
+    def test_utils_compute_idle_time(self):
+        profiler = self.generate_mock_profile()
+        basic_evaluation = _utils.BasicEvaluation(profiler)
+        res = ""
+        for event_key in basic_evaluation.event_keys:
+            res += f"{basic_evaluation.metrics[event_key].idle_time_ns} [{event_key.event.name()}]\n"
+
+        self.assertExpectedInline(
+            res, """\
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+100000 [CPU]
+300000 [CPU]
+""")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    def test_utils_get_optimizable_events(self):
+
+        def garbage_code():
+            for i in range(100):
+                x[0, i] = i
+
+        x = torch.ones((8192, 8192)).to("cuda")
+        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                     record_shapes=True,
+                     profile_memory=True,
+                     with_stack=True,
+                     with_flops=True,
+                     with_modules=True) as prof:
+            for _ in range(100):
+                x = x @ x
+            garbage_code()
+            for _ in range(100):
+                x = x @ x
+        basic_evaluation = _utils.BasicEvaluation(prof.profiler)
+        optimizable_events = basic_evaluation.get_optimizable_events(
+            5, print_enable=False)
+        self.assertTrue(len(optimizable_events) == 5)
+        self.assertTrue("garbage_code" in optimizable_events[0].event.name())
 
 
 if __name__ == '__main__':
