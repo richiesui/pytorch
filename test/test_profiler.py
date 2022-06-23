@@ -1234,6 +1234,45 @@ class TestExperimentalUtils(TestCase):
                     for child in event_key.event.children
                 ]))
 
+    def test_utils_compute_queue_depth(self):
+
+        def format_queue_depth(queue_depth_list, events):
+            res = ""
+            for data, event in zip(queue_depth_list, events):
+                res += f"{data.queue_depth} [{event.name()}]\n"
+            return res
+
+        # We have to use Mock because time series data is too flakey to test
+        profiler = self.generate_mock_profile()
+        basic_evaluation = _utils.BasicEvaluation(profiler)
+        self.assertExpectedInline(
+            format_queue_depth(basic_evaluation.queue_depth_list,
+                               basic_evaluation.cuda_events), """\
+1 [cudaLaunchKernel]
+2 [cudaLaunchKernel]
+3 [cudaLaunchKernel]
+2 [GPU]
+1 [GPU]
+0 [GPU]
+""")
+        self.assertExpectedInline(
+            format_queue_depth([
+                basic_evaluation.metrics[k]
+                for k in basic_evaluation.event_keys
+            ], basic_evaluation.events), """\
+0 [CPU]
+0 [CPU]
+0 [CPU]
+0 [CPU]
+1 [CPU]
+2 [CPU]
+3 [CPU]
+2 [CPU]
+1 [CPU]
+0 [CPU]
+0 [CPU]
+""")
+
     def test_utils_compute_queue_depth_when_no_cuda_events(self):
         # For traces with only cpu events, we expect empty queue depth list
         x = torch.ones((1024, 1024))
